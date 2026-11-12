@@ -1900,6 +1900,10 @@ namespace plume {
         bool triangleFan = false;
         bool dynamicDepthBias = false;
 
+        // Vertex shaders can pick the render target array layer and the viewport
+        // (SV_RenderTargetArrayIndex, SV_ViewportArrayIndex) without a geometry shader.
+        bool vertexShaderLayerAndViewport = false;
+
         // UMA.
         bool uma = false;
 

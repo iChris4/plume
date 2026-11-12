@@ -91,6 +91,7 @@ namespace plume {
         VK_KHR_PRESENT_ID_EXTENSION_NAME,
         VK_KHR_PRESENT_WAIT_EXTENSION_NAME,
         VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME,
+        VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME,
         // Vulkan spec requires this to be enabled if supported by the driver.
         VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
     };
@@ -4080,6 +4081,8 @@ namespace plume {
         capabilities.maxTextureSize = physicalDeviceProperties.limits.maxImageDimension2D;
         capabilities.preferHDR = memoryHeapSize > (512 * 1024 * 1024);
         capabilities.dynamicDepthBias = true;
+        capabilities.vertexShaderLayerAndViewport = deviceFeatures.features.multiViewport &&
+            (supportedOptionalExtensions.find(VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME) != supportedOptionalExtensions.end());
         capabilities.queryPools = true;
         capabilities.uma = (description.type == RenderDeviceType::INTEGRATED) && hasHostVisibleDeviceLocalMemory;
         capabilities.gpuUploadHeap = capabilities.uma;

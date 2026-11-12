@@ -3643,6 +3643,14 @@ namespace plume {
                 }
             }
 
+            // Determine if vertex shaders can pick the render target array layer and the viewport.
+            bool vertexShaderLayerAndViewportOption = false;
+            D3D12_FEATURE_DATA_D3D12_OPTIONS d3d12Options = {};
+            res = deviceOption->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &d3d12Options, sizeof(d3d12Options));
+            if (SUCCEEDED(res)) {
+                vertexShaderLayerAndViewportOption = d3d12Options.VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation;
+            }
+
             // Determine if the device supports sample locations.
             bool samplePositionsOption = false;
             D3D12_FEATURE_DATA_D3D12_OPTIONS2 d3d12Options2 = {};
@@ -3716,6 +3724,7 @@ namespace plume {
                 capabilities.resolveModes = samplePositionsOption;
                 capabilities.triangleFan = triangleFanSupportOption;
                 capabilities.dynamicDepthBias = dynamicDepthBiasOption;
+                capabilities.vertexShaderLayerAndViewport = vertexShaderLayerAndViewportOption;
                 capabilities.uma = uma;
 
                 // Pretend GPU Upload heaps are supported if UMA is supported, as
