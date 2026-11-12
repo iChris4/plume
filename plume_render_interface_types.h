@@ -175,7 +175,10 @@ namespace plume {
         TEXTURE_1D,
         TEXTURE_2D,
         TEXTURE_3D,
-        TEXTURE_CUBE
+        TEXTURE_CUBE,
+
+        // A 2D array view even when it covers a single layer.
+        TEXTURE_2D_ARRAY
     };
 
     enum class RenderCommandListType {
