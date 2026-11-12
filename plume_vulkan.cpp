@@ -41,6 +41,13 @@ namespace plume {
     // so they're not under the limit set by the the device or the backend.
     static const uint32_t MaxQueuesPerFamilyCount = 4;
 
+    std::vector<std::string> VulkanAdditionalInstanceExtensions;
+    std::vector<std::string> VulkanAdditionalDeviceExtensions;
+
+    static bool isAdditionalExtension(const std::vector<std::string> &additionalExtensions, const std::string &extensionName) {
+        return std::find(additionalExtensions.begin(), additionalExtensions.end(), extensionName) != additionalExtensions.end();
+    }
+
     // Required extensions.
 
     static const std::unordered_set<std::string> RequiredInstanceExtensions = {
@@ -3773,6 +3780,9 @@ namespace plume {
             if (OptionalDeviceExtensions.find(extensionName) != OptionalDeviceExtensions.end()) {
                 supportedOptionalExtensions.insert(extensionName);
             }
+            else if (isAdditionalExtension(VulkanAdditionalDeviceExtensions, extensionName) && (RequiredDeviceExtensions.find(extensionName) == RequiredDeviceExtensions.end())) {
+                supportedOptionalExtensions.insert(extensionName);
+            }
 #       if DLSS_ENABLED
             else if (dlssExtensions.find(extensionName) != dlssExtensions.end()) {
                 supportedOptionalExtensions.insert(extensionName);
@@ -4458,6 +4468,9 @@ namespace plume {
             missingRequiredExtensions.erase(extensionName);
 
             if (OptionalInstanceExtensions.find(extensionName) != OptionalInstanceExtensions.end()) {
+                supportedOptionalExtensions.insert(extensionName);
+            }
+            else if (isAdditionalExtension(VulkanAdditionalInstanceExtensions, extensionName) && (requiredExtensions.find(extensionName) == requiredExtensions.end())) {
                 supportedOptionalExtensions.insert(extensionName);
             }
 #       if DLSS_ENABLED

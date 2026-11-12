@@ -450,6 +450,13 @@ namespace plume {
         bool endCapture() override;
     };
 
+    // Extensions an embedding application needs on top of plume's own, such as
+    // those an OpenXR runtime requires. Instance extensions are read when the
+    // interface is created, device extensions when a device is; each is enabled
+    // when the instance or the physical device supports it.
+    extern std::vector<std::string> VulkanAdditionalInstanceExtensions;
+    extern std::vector<std::string> VulkanAdditionalDeviceExtensions;
+
     struct VulkanInterface : RenderInterface {
         VkInstance instance = VK_NULL_HANDLE;
         VkApplicationInfo appInfo = {};
