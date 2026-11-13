@@ -709,6 +709,8 @@ namespace plume {
             return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         case RenderTextureLayout::PRESENT:
             return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        case RenderTextureLayout::SHADING_RATE_SOURCE:
+            return VK_IMAGE_LAYOUT_GENERAL;
         default:
             assert(false && "Unknown texture layout.");
             return VK_IMAGE_LAYOUT_UNDEFINED;

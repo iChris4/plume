@@ -487,7 +487,10 @@ namespace plume {
         COPY_DEST,
         RESOLVE_SOURCE,
         RESOLVE_DEST,
-        PRESENT
+        PRESENT,
+
+        // A shading rate image (see RenderCommandList::setShadingRateImage).
+        SHADING_RATE_SOURCE
     };
     
     namespace RenderSampleCount {
@@ -1911,6 +1914,14 @@ namespace plume {
         // Vertex shaders can pick the render target array layer and the viewport
         // (SV_RenderTargetArrayIndex, SV_ViewportArrayIndex) without a geometry shader.
         bool vertexShaderLayerAndViewport = false;
+
+        // Draws can be shaded at a coarser rate per screen tile, from an R8_UINT
+        // image of a texel per tile (RenderCommandList::setShadingRateImage),
+        // whose values are D3D12_SHADING_RATE values. The tile size in pixels,
+        // and whether rates coarser than 2x2 (2x4, 4x2, 4x4) are available.
+        bool shadingRateImage = false;
+        uint32_t shadingRateImageTileSize = 0;
+        bool shadingRateImageCoarseRates = false;
 
         // UMA.
         bool uma = false;

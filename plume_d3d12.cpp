@@ -668,6 +668,8 @@ namespace plume {
             return D3D12_RESOURCE_STATE_RESOLVE_DEST;
         case RenderTextureLayout::PRESENT:
             return D3D12_RESOURCE_STATE_PRESENT;
+        case RenderTextureLayout::SHADING_RATE_SOURCE:
+            return D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE;
         default:
             assert(false && "Unknown texture layout.");
             return D3D12_RESOURCE_STATE_COMMON;
@@ -2209,6 +2211,23 @@ namespace plume {
         }
     }
 
+    void D3D12CommandList::setShadingRateImage(const RenderTexture *image) {
+        if (!queue->device->capabilities.shadingRateImage) {
+            return;
+        }
+
+        if (image != nullptr) {
+            // The image's rate replaces the base rate.
+            const D3D12_SHADING_RATE_COMBINER combiners[2] = { D3D12_SHADING_RATE_COMBINER_PASSTHROUGH, D3D12_SHADING_RATE_COMBINER_OVERRIDE };
+            d3d->RSSetShadingRate(D3D12_SHADING_RATE_1X1, combiners);
+            d3d->RSSetShadingRateImage(static_cast<const D3D12Texture *>(image)->d3d);
+        }
+        else {
+            d3d->RSSetShadingRateImage(nullptr);
+            d3d->RSSetShadingRate(D3D12_SHADING_RATE_1X1, nullptr);
+        }
+    }
+
     void D3D12CommandList::setDepthBias(float depthBias, float depthBiasClamp, float slopeScaledDepthBias) {
 #   ifdef D3D12_AGILITY_SDK_ENABLED
         assert(queue->device->capabilities.dynamicDepthBias && "Dynamic depth bias is unsupported on this device.");
@@ -3659,6 +3678,18 @@ namespace plume {
                 }
             }
 
+            // Determine if draws can be shaded at a rate per screen tile (variable rate shading tier 2).
+            bool shadingRateImageOption = false;
+            uint32_t shadingRateImageTileSizeOption = 0;
+            bool shadingRateImageCoarseRatesOption = false;
+            D3D12_FEATURE_DATA_D3D12_OPTIONS6 d3d12Options6 = {};
+            res = deviceOption->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS6, &d3d12Options6, sizeof(d3d12Options6));
+            if (SUCCEEDED(res) && (d3d12Options6.VariableShadingRateTier >= D3D12_VARIABLE_SHADING_RATE_TIER_2) && (d3d12Options6.ShadingRateImageTileSize > 0)) {
+                shadingRateImageOption = true;
+                shadingRateImageTileSizeOption = d3d12Options6.ShadingRateImageTileSize;
+                shadingRateImageCoarseRatesOption = d3d12Options6.AdditionalShadingRatesSupported;
+            }
+
             // Determine if vertex shaders can pick the render target array layer and the viewport.
             bool vertexShaderLayerAndViewportOption = false;
             D3D12_FEATURE_DATA_D3D12_OPTIONS d3d12Options = {};
@@ -3741,6 +3772,9 @@ namespace plume {
                 capabilities.triangleFan = triangleFanSupportOption;
                 capabilities.dynamicDepthBias = dynamicDepthBiasOption;
                 capabilities.vertexShaderLayerAndViewport = vertexShaderLayerAndViewportOption;
+                capabilities.shadingRateImage = shadingRateImageOption;
+                capabilities.shadingRateImageTileSize = shadingRateImageTileSizeOption;
+                capabilities.shadingRateImageCoarseRates = shadingRateImageCoarseRatesOption;
                 capabilities.uma = uma;
 
                 // Pretend GPU Upload heaps are supported if UMA is supported, as
