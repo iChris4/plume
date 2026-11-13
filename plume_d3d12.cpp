@@ -2315,7 +2315,13 @@ namespace plume {
         const D3D12Texture *interfaceDstTexture = static_cast<const D3D12Texture *>(dstTexture);
         const D3D12Texture *interfaceSrcTexture = static_cast<const D3D12Texture *>(srcTexture);
         setSamplePositions(interfaceDstTexture);
-        d3d->ResolveSubresource(interfaceDstTexture->d3d, 0, interfaceSrcTexture->d3d, 0, toDXGI(interfaceDstTexture->desc.format));
+
+        // Every layer both textures have (their first mip level).
+        const uint32_t layerCount = std::min(interfaceSrcTexture->desc.arraySize, interfaceDstTexture->desc.arraySize);
+        for (uint32_t i = 0; i < layerCount; i++) {
+            d3d->ResolveSubresource(interfaceDstTexture->d3d, i * interfaceDstTexture->desc.mipLevels, interfaceSrcTexture->d3d, i * interfaceSrcTexture->desc.mipLevels, toDXGI(interfaceDstTexture->desc.format));
+        }
+
         resetSamplePositions();
     }
 
@@ -2334,7 +2340,13 @@ namespace plume {
         }
 
         setSamplePositions(interfaceDstTexture);
-        d3d->ResolveSubresourceRegion(interfaceDstTexture->d3d, 0, dstX, dstY, interfaceSrcTexture->d3d, 0, (srcRect != nullptr) ? &rect : nullptr, toDXGI(interfaceDstTexture->desc.format), toD3D12(resolveMode));
+
+        // Every layer both textures have (their first mip level).
+        const uint32_t layerCount = std::min(interfaceSrcTexture->desc.arraySize, interfaceDstTexture->desc.arraySize);
+        for (uint32_t i = 0; i < layerCount; i++) {
+            d3d->ResolveSubresourceRegion(interfaceDstTexture->d3d, i * interfaceDstTexture->desc.mipLevels, dstX, dstY, interfaceSrcTexture->d3d, i * interfaceSrcTexture->desc.mipLevels, (srcRect != nullptr) ? &rect : nullptr, toDXGI(interfaceDstTexture->desc.format), toD3D12(resolveMode));
+        }
+
         resetSamplePositions();
     }
 

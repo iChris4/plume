@@ -1296,6 +1296,11 @@ namespace plume {
         uint32_t inputElementsCount = 0;
         const RenderSpecConstant *specConstants = nullptr;
         uint32_t specConstantsCount = 0;
+
+        // Viewports and scissor rectangles the pipeline uses, for vertex shaders
+        // that select one (SV_ViewportArrayIndex); at least one per render target.
+        // All of them must be set before drawing.
+        uint32_t viewportCount = 1;
     };
 
     struct RenderRaytracingPipelineLibrarySymbol {

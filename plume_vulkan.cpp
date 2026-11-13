@@ -1496,8 +1496,8 @@ namespace plume {
 
         VkPipelineViewportStateCreateInfo viewportState = {};
         viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-        viewportState.viewportCount = renderTargetCount;
-        viewportState.scissorCount = renderTargetCount;
+        viewportState.viewportCount = std::max(renderTargetCount, desc.viewportCount);
+        viewportState.scissorCount = viewportState.viewportCount;
 
         VkPipelineRasterizationStateCreateInfo rasterization = {};
         rasterization.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
@@ -2502,6 +2502,7 @@ namespace plume {
         std::vector<VkAttachmentReference> colorReferences;
         std::vector<VkImageView> imageViews;
         VkAttachmentReference depthReference = {};
+        uint32_t attachmentLayers = UINT32_MAX;
         for (uint32_t i = 0; i < desc.colorAttachmentsCount; i++) {
             const VulkanTexture *colorAttachment;
             VkImageView colorAttachmentImageView;
@@ -2511,10 +2512,12 @@ namespace plume {
                 colorAttachment = colorAttachmentView->texture;
                 colorAttachmentImageView = colorAttachmentView->vk;
                 colorAttachmentFormat = colorAttachmentView->desc.format;
+                attachmentLayers = std::min(attachmentLayers, std::min(colorAttachmentView->desc.arraySize, colorAttachment->desc.arraySize - colorAttachmentView->desc.arrayIndex));
             } else {
                 colorAttachment = static_cast<const VulkanTexture *>(desc.colorAttachments[i]);
                 colorAttachmentImageView = colorAttachment->imageView;
                 colorAttachmentFormat = colorAttachment->desc.format;
+                attachmentLayers = std::min(attachmentLayers, colorAttachment->desc.arraySize);
             }
             assert((colorAttachment->desc.flags & RenderTextureFlag::RENDER_TARGET) && "Color attachment must be a render target.");
             colorAttachments.emplace_back(colorAttachment);
@@ -2550,11 +2553,13 @@ namespace plume {
                 depthAttachment = depthAttachmentView->texture;
                 depthAttachmentImageView = depthAttachmentView->vk;
                 depthAttachmentViewDesc = depthAttachmentView->desc;
+                attachmentLayers = std::min(attachmentLayers, std::min(depthAttachmentView->desc.arraySize, depthAttachment->desc.arraySize - depthAttachmentView->desc.arrayIndex));
             } else {
                 depthAttachment = static_cast<const VulkanTexture *>(desc.depthAttachment);
                 depthAttachmentImageView = depthAttachment->imageView;
                 depthAttachmentViewDesc.format = depthAttachment->desc.format;
                 depthAttachmentViewDesc.dimension = RenderTextureDimensionToView(depthAttachment->desc.dimension);
+                attachmentLayers = std::min(attachmentLayers, depthAttachment->desc.arraySize);
             }
             if (RenderFormatIsDepth(depthAttachmentViewDesc.format) && RenderFormatIsStencil(depthAttachmentViewDesc.format)) {
                 // Base image view is configured for sampling depth. For framebuffer attachment,
@@ -2617,7 +2622,14 @@ namespace plume {
         fbInfo.attachmentCount = uint32_t(imageViews.size());
         fbInfo.width = width;
         fbInfo.height = height;
-        fbInfo.layers = 1;
+
+        // Cube and 3D attachments are drawn into one face or slice at a time.
+        const VulkanTexture *firstAttachment = !colorAttachments.empty() ? colorAttachments[0] : depthAttachment;
+        if ((attachmentLayers != UINT32_MAX) && (firstAttachment != nullptr) && (firstAttachment->desc.dimension == RenderTextureDimension::TEXTURE_2D) && !(firstAttachment->desc.flags & RenderTextureFlag::CUBE)) {
+            layers = std::max(attachmentLayers, 1U);
+        }
+
+        fbInfo.layers = layers;
 
         res = vkCreateFramebuffer(device->vk, &fbInfo, nullptr, &vk);
         if (res != VK_SUCCESS) {
@@ -3085,7 +3097,7 @@ namespace plume {
         vkCmdSetDepthBias(vk, depthBias, depthBiasClamp, slopeScaledDepthBias);
     }
 
-    static void clearCommonRectVector(uint32_t width, uint32_t height, const RenderRect *clearRects, uint32_t clearRectsCount, std::vector<VkClearRect> &rectVector) {
+    static void clearCommonRectVector(uint32_t width, uint32_t height, uint32_t layers, const RenderRect *clearRects, uint32_t clearRectsCount, std::vector<VkClearRect> &rectVector) {
         rectVector.clear();
 
         if (clearRectsCount > 0) {
@@ -3096,7 +3108,7 @@ namespace plume {
                 clearRect.rect.extent.width = clearRects[i].right - clearRects[i].left;
                 clearRect.rect.extent.height = clearRects[i].bottom - clearRects[i].top;
                 clearRect.baseArrayLayer = 0;
-                clearRect.layerCount = 1;
+                clearRect.layerCount = layers;
                 rectVector.emplace_back(clearRect);
             }
         }
@@ -3107,7 +3119,7 @@ namespace plume {
             clearRect.rect.extent.width = width;
             clearRect.rect.extent.height = height;
             clearRect.baseArrayLayer = 0;
-            clearRect.layerCount = 1;
+            clearRect.layerCount = layers;
             rectVector.emplace_back(clearRect);
         }
     }
@@ -3120,7 +3132,7 @@ namespace plume {
         checkActiveRenderPass();
 
         thread_local std::vector<VkClearRect> rectVector;
-        clearCommonRectVector(targetFramebuffer->getWidth(), targetFramebuffer->getHeight(), clearRects, clearRectsCount, rectVector);
+        clearCommonRectVector(targetFramebuffer->getWidth(), targetFramebuffer->getHeight(), targetFramebuffer->layers, clearRects, clearRectsCount, rectVector);
 
         VkClearAttachment attachment = {};
         auto &rgba = attachment.clearValue.color.float32;
@@ -3140,7 +3152,7 @@ namespace plume {
         checkActiveRenderPass();
 
         thread_local std::vector<VkClearRect> rectVector;
-        clearCommonRectVector(targetFramebuffer->getWidth(), targetFramebuffer->getHeight(), clearRects, clearRectsCount, rectVector);
+        clearCommonRectVector(targetFramebuffer->getWidth(), targetFramebuffer->getHeight(), targetFramebuffer->layers, clearRects, clearRectsCount, rectVector);
 
         VkClearAttachment attachment = {};
         attachment.clearValue.depthStencil.depth = depthValue;
@@ -3265,13 +3277,14 @@ namespace plume {
         const VulkanTexture *src = static_cast<const VulkanTexture *>(srcTexture);
         VkImageLayout srcLayout = toImageLayout(src->textureLayout);
         VkImageLayout dstLayout = toImageLayout(dst->textureLayout);
+        const uint32_t layerCount = std::min(src->desc.arraySize, dst->desc.arraySize);
         VkImageCopy imageCopy = {};
         imageCopy.srcSubresource.aspectMask = toAspectFlags(src->desc.format, src->desc.flags);
         imageCopy.srcSubresource.baseArrayLayer = 0;
-        imageCopy.srcSubresource.layerCount = 1;
+        imageCopy.srcSubresource.layerCount = layerCount;
         imageCopy.dstSubresource.aspectMask = toAspectFlags(dst->desc.format, dst->desc.flags);
         imageCopy.dstSubresource.baseArrayLayer = 0;
-        imageCopy.dstSubresource.layerCount = 1;
+        imageCopy.dstSubresource.layerCount = layerCount;
         imageCopy.extent.width = uint32_t(dst->desc.width);
         imageCopy.extent.height = dst->desc.height;
         imageCopy.extent.depth = dst->desc.depth;
@@ -3304,15 +3317,16 @@ namespace plume {
         const VulkanTexture *src = static_cast<const VulkanTexture *>(srcTexture);
         VkImageLayout srcLayout = toImageLayout(src->textureLayout);
         VkImageLayout dstLayout = toImageLayout(dst->textureLayout);
+        const uint32_t layerCount = std::min(src->desc.arraySize, dst->desc.arraySize);
         VkImageResolve imageResolve = {};
         imageResolve.srcSubresource.aspectMask = toAspectFlags(src->desc.format, src->desc.flags);
         imageResolve.srcSubresource.baseArrayLayer = 0;
-        imageResolve.srcSubresource.layerCount = 1;
+        imageResolve.srcSubresource.layerCount = layerCount;
         imageResolve.dstOffset.x = dstX;
         imageResolve.dstOffset.y = dstY;
         imageResolve.dstSubresource.aspectMask = toAspectFlags(dst->desc.format, dst->desc.flags);
         imageResolve.dstSubresource.baseArrayLayer = 0;
-        imageResolve.dstSubresource.layerCount = 1;
+        imageResolve.dstSubresource.layerCount = layerCount;
         imageResolve.extent.depth = dst->desc.depth;
 
         if (srcRect != nullptr) {
