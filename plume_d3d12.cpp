@@ -3773,6 +3773,7 @@ namespace plume {
                 capabilities.dynamicDepthBias = dynamicDepthBiasOption;
                 capabilities.vertexShaderLayerAndViewport = vertexShaderLayerAndViewportOption;
                 capabilities.shadingRateImage = shadingRateImageOption;
+                capabilities.shadingRateImageLayers = shadingRateImageOption;
                 capabilities.shadingRateImageTileSize = shadingRateImageTileSizeOption;
                 capabilities.shadingRateImageCoarseRates = shadingRateImageCoarseRatesOption;
                 capabilities.uma = uma;

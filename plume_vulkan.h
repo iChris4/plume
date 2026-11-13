@@ -305,6 +305,7 @@ namespace plume {
         const VulkanPipelineLayout *activeGraphicsPipelineLayout = nullptr;
         const VulkanPipelineLayout *activeRaytracingPipelineLayout = nullptr;
         VkRenderPass activeRenderPass = VK_NULL_HANDLE;
+        bool shadingRateSet = false;
 
         VulkanCommandList(VulkanCommandQueue *queue);
         ~VulkanCommandList() override;
@@ -332,6 +333,7 @@ namespace plume {
         void setScissors(const RenderRect *scissorRects, uint32_t count) override;
         void setFramebuffer(const RenderFramebuffer *framebuffer) override;
         void setDepthBias(float depthBias, float depthBiasClamp, float slopeScaledDepthBias) override;
+        void setShadingRateImage(const RenderTexture *image) override;
         void clearColor(uint32_t attachmentIndex, RenderColor colorValue, const RenderRect *clearRects, uint32_t clearRectsCount) override;
         void clearDepthStencil(bool clearDepth, bool clearStencil, float depthValue, uint32_t stencilValue, const RenderRect *clearRects, uint32_t clearRectsCount) override;
         void copyBufferRegion(RenderBufferReference dstBuffer, RenderBufferReference srcBuffer, uint64_t size) override;
@@ -421,6 +423,12 @@ namespace plume {
         bool loadStoreOpNoneSupported = false;
         bool nullDescriptorSupported = false;
 
+        // Render passes take a shading rate attachment: the texture set with
+        // setShadingRateAttachment, a texel per tile of this size.
+        bool shadingRateAttachments = false;
+        VkExtent2D shadingRateTexelSize = {};
+        const VulkanTexture *shadingRateTexture = nullptr;
+
         VulkanDevice(VulkanInterface *renderInterface, const std::string &preferredDeviceName);
         ~VulkanDevice() override;
         std::unique_ptr<RenderDescriptorSet> createDescriptorSet(const RenderDescriptorSetDesc &desc) override;
@@ -438,6 +446,7 @@ namespace plume {
         std::unique_ptr<RenderCommandFence> createCommandFence() override;
         std::unique_ptr<RenderCommandSemaphore> createCommandSemaphore() override;
         std::unique_ptr<RenderFramebuffer> createFramebuffer(const RenderFramebufferDesc &desc) override;
+        void setShadingRateAttachment(const RenderTexture *texture) override;
         std::unique_ptr<RenderQueryPool> createQueryPool(uint32_t queryCount) override;
         void setBottomLevelASBuildInfo(RenderBottomLevelASBuildInfo &buildInfo, const RenderBottomLevelASMesh *meshes, uint32_t meshCount, bool preferFastBuild, bool preferFastTrace) override;
         void setTopLevelASBuildInfo(RenderTopLevelASBuildInfo &buildInfo, const RenderTopLevelASInstance *instances, uint32_t instanceCount, bool preferFastBuild, bool preferFastTrace) override;
@@ -457,6 +466,11 @@ namespace plume {
     // when the instance or the physical device supports it.
     extern std::vector<std::string> VulkanAdditionalInstanceExtensions;
     extern std::vector<std::string> VulkanAdditionalDeviceExtensions;
+
+    // Set before the device is created to have its render passes take a shading
+    // rate attachment (VK_KHR_fragment_shading_rate), where the device can: see
+    // RenderDeviceCapabilities::shadingRateAttachment.
+    extern bool VulkanShadingRateAttachments;
 
     struct VulkanInterface : RenderInterface {
         VkInstance instance = VK_NULL_HANDLE;

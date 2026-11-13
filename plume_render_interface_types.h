@@ -447,7 +447,10 @@ namespace plume {
             DEPTH_TARGET = 1U << 1,
             STORAGE = 1U << 2,
             UNORDERED_ACCESS = 1U << 3,
-            CUBE = 1U << 4
+            CUBE = 1U << 4,
+
+            // A shading rate image (see RenderCommandList::setShadingRateImage).
+            SHADING_RATE = 1U << 5
         };
     };
 
@@ -1919,7 +1922,18 @@ namespace plume {
         // image of a texel per tile (RenderCommandList::setShadingRateImage),
         // whose values are D3D12_SHADING_RATE values. The tile size in pixels,
         // and whether rates coarser than 2x2 (2x4, 4x2, 4x4) are available.
+        // When shadingRateAttachment is set as well (Vulkan), the image is part of
+        // every framebuffer: there is one for the device, set with
+        // RenderDevice::setShadingRateAttachment before any framebuffer is
+        // created and large enough for all of them (maxTextureSize over the tile
+        // size); setShadingRateImage then only turns its use on (any image) or
+        // off (null).
+        bool shadingRateAttachment = false;
         bool shadingRateImage = false;
+
+        // A shading rate image with as many layers as the render target is read
+        // layer for layer (one with a single layer serves them all).
+        bool shadingRateImageLayers = false;
         uint32_t shadingRateImageTileSize = 0;
         bool shadingRateImageCoarseRates = false;
 

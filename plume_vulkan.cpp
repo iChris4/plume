@@ -43,6 +43,7 @@ namespace plume {
 
     std::vector<std::string> VulkanAdditionalInstanceExtensions;
     std::vector<std::string> VulkanAdditionalDeviceExtensions;
+    bool VulkanShadingRateAttachments = false;
 
     static bool isAdditionalExtension(const std::vector<std::string> &additionalExtensions, const std::string &extensionName) {
         return std::find(additionalExtensions.begin(), additionalExtensions.end(), extensionName) != additionalExtensions.end();
@@ -97,6 +98,93 @@ namespace plume {
     };
 
     // Common functions.
+
+    // Creates a single-subpass render pass like vkCreateRenderPass would from
+    // these attachments and references, with the device's shading rate
+    // attachment after them (see VulkanDevice::shadingRateAttachments). Pipelines
+    // and framebuffers must all be created this way to stay compatible.
+    static VkResult createRenderPassWithShadingRate(VkDevice device, VkExtent2D texelSize, bool loadStoreOpNone,
+        const std::vector<VkAttachmentDescription> &attachments, const std::vector<VkAttachmentReference> &colorReferences,
+        const VkAttachmentReference *depthReference, VkRenderPass *renderPass)
+    {
+        thread_local std::vector<VkAttachmentDescription2> attachments2;
+        thread_local std::vector<VkAttachmentReference2> colorReferences2;
+        attachments2.clear();
+        colorReferences2.clear();
+
+        for (const VkAttachmentDescription &attachment : attachments) {
+            VkAttachmentDescription2 attachment2 = {};
+            attachment2.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
+            attachment2.flags = attachment.flags;
+            attachment2.format = attachment.format;
+            attachment2.samples = attachment.samples;
+            attachment2.loadOp = attachment.loadOp;
+            attachment2.storeOp = attachment.storeOp;
+            attachment2.stencilLoadOp = attachment.stencilLoadOp;
+            attachment2.stencilStoreOp = attachment.stencilStoreOp;
+            attachment2.initialLayout = attachment.initialLayout;
+            attachment2.finalLayout = attachment.finalLayout;
+            attachments2.emplace_back(attachment2);
+        }
+
+        for (const VkAttachmentReference &reference : colorReferences) {
+            VkAttachmentReference2 reference2 = {};
+            reference2.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
+            reference2.attachment = reference.attachment;
+            reference2.layout = reference.layout;
+            reference2.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            colorReferences2.emplace_back(reference2);
+        }
+
+        VkAttachmentReference2 depthReference2 = {};
+        if (depthReference != nullptr) {
+            depthReference2.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
+            depthReference2.attachment = depthReference->attachment;
+            depthReference2.layout = depthReference->layout;
+            depthReference2.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        }
+
+        // The shading rate attachment: read only, always in its own layout.
+        VkAttachmentReference2 shadingRateReference = {};
+        shadingRateReference.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
+        shadingRateReference.attachment = uint32_t(attachments2.size());
+        shadingRateReference.layout = VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR;
+        shadingRateReference.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+        VkAttachmentDescription2 shadingRateAttachment = {};
+        shadingRateAttachment.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
+        shadingRateAttachment.format = VK_FORMAT_R8_UINT;
+        shadingRateAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        shadingRateAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        shadingRateAttachment.storeOp = loadStoreOpNone ? VK_ATTACHMENT_STORE_OP_NONE_EXT : VK_ATTACHMENT_STORE_OP_STORE;
+        shadingRateAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        shadingRateAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        shadingRateAttachment.initialLayout = VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR;
+        shadingRateAttachment.finalLayout = VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR;
+        attachments2.emplace_back(shadingRateAttachment);
+
+        VkFragmentShadingRateAttachmentInfoKHR shadingRateInfo = {};
+        shadingRateInfo.sType = VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR;
+        shadingRateInfo.pFragmentShadingRateAttachment = &shadingRateReference;
+        shadingRateInfo.shadingRateAttachmentTexelSize = texelSize;
+
+        VkSubpassDescription2 subpass = {};
+        subpass.sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2;
+        subpass.pNext = &shadingRateInfo;
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass.pColorAttachments = !colorReferences2.empty() ? colorReferences2.data() : nullptr;
+        subpass.colorAttachmentCount = uint32_t(colorReferences2.size());
+        subpass.pDepthStencilAttachment = (depthReference != nullptr) ? &depthReference2 : nullptr;
+
+        VkRenderPassCreateInfo2 passInfo = {};
+        passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2;
+        passInfo.pAttachments = attachments2.data();
+        passInfo.attachmentCount = uint32_t(attachments2.size());
+        passInfo.pSubpasses = &subpass;
+        passInfo.subpassCount = 1;
+
+        return vkCreateRenderPass2(device, &passInfo, nullptr, renderPass);
+    }
 
     static uint32_t roundUp(uint32_t value, uint32_t powerOf2Alignment) {
         return (value + powerOf2Alignment - 1) & ~(powerOf2Alignment - 1);
@@ -710,7 +798,7 @@ namespace plume {
         case RenderTextureLayout::PRESENT:
             return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         case RenderTextureLayout::SHADING_RATE_SOURCE:
-            return VK_IMAGE_LAYOUT_GENERAL;
+            return VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR;
         default:
             assert(false && "Unknown texture layout.");
             return VK_IMAGE_LAYOUT_UNDEFINED;
@@ -982,6 +1070,7 @@ namespace plume {
         imageInfo.usage |= (desc.flags & RenderTextureFlag::RENDER_TARGET) ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0;
         imageInfo.usage |= (desc.flags & RenderTextureFlag::DEPTH_TARGET) ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : 0;
         imageInfo.usage |= (desc.flags & RenderTextureFlag::STORAGE) ? VK_IMAGE_USAGE_STORAGE_BIT : 0;
+        imageInfo.usage |= ((desc.flags & RenderTextureFlag::SHADING_RATE) && device->shadingRateAttachments) ? VK_IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR : 0;
 
         if (desc.multisampling.sampleLocationsEnabled && (desc.flags & RenderTextureFlag::DEPTH_TARGET)) {
             imageInfo.flags |= VK_IMAGE_CREATE_SAMPLE_LOCATIONS_COMPATIBLE_DEPTH_BIT_EXT;
@@ -1607,6 +1696,11 @@ namespace plume {
         dynamicStates.emplace_back(VK_DYNAMIC_STATE_VIEWPORT);
         dynamicStates.emplace_back(VK_DYNAMIC_STATE_SCISSOR);
 
+        // Whether the shading rate attachment is used is set per draw (setShadingRateImage).
+        if (device->shadingRateAttachments) {
+            dynamicStates.emplace_back(VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR);
+        }
+
         if (desc.dynamicDepthBiasEnabled) {
             dynamicStates.emplace_back(VK_DYNAMIC_STATE_DEPTH_BIAS);
         }
@@ -1724,7 +1818,15 @@ namespace plume {
         passInfo.pSubpasses = &subpass;
         passInfo.subpassCount = 1;
 
-        VkResult res = vkCreateRenderPass(device->vk, &passInfo, nullptr, &renderPass);
+        VkResult res;
+        if (device->shadingRateAttachments) {
+            res = createRenderPassWithShadingRate(device->vk, device->shadingRateTexelSize, device->loadStoreOpNoneSupported, attachments, colorReferences,
+                (depthTargetFormat != VK_FORMAT_UNDEFINED) ? &depthReference : nullptr, &renderPass);
+        }
+        else {
+            res = vkCreateRenderPass(device->vk, &passInfo, nullptr, &renderPass);
+        }
+
         if (res == VK_SUCCESS) {
             return renderPass;
         }
@@ -2611,7 +2713,23 @@ namespace plume {
         passInfo.pSubpasses = &subpass;
         passInfo.subpassCount = 1;
 
-        res = vkCreateRenderPass(device->vk, &passInfo, nullptr, &renderPass);
+        if (device->shadingRateAttachments) {
+            // The device's shading rate image is every framebuffer's last attachment.
+            assert((device->shadingRateTexture != nullptr) && "The shading rate attachment must be set before framebuffers are created.");
+            if (device->shadingRateTexture == nullptr) {
+                fprintf(stderr, "The shading rate attachment was not set before a framebuffer was created.\n");
+                return;
+            }
+
+            res = createRenderPassWithShadingRate(device->vk, device->shadingRateTexelSize, device->loadStoreOpNoneSupported, attachments, colorReferences,
+                (subpass.pDepthStencilAttachment != nullptr) ? &depthReference : nullptr, &renderPass);
+
+            imageViews.emplace_back(device->shadingRateTexture->imageView);
+        }
+        else {
+            res = vkCreateRenderPass(device->vk, &passInfo, nullptr, &renderPass);
+        }
+
         if (res != VK_SUCCESS) {
             fprintf(stderr, "vkCreateRenderPass failed with error code 0x%X.\n", res);
             return;
@@ -2787,6 +2905,7 @@ namespace plume {
 
     void VulkanCommandList::begin() {
         vkResetCommandBuffer(vk, 0);
+        shadingRateSet = false;
 
         VkCommandBufferBeginInfo beginInfo = {};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -3093,6 +3212,23 @@ namespace plume {
         else {
             targetFramebuffer = nullptr;
         }
+    }
+
+    void VulkanCommandList::setShadingRateImage(const RenderTexture *image) {
+        shadingRateSet = true;
+
+        if (!queue->device->shadingRateAttachments) {
+            return;
+        }
+
+        // The attachment is the framebuffer's: the image only tells whether its rates replace the full rate.
+        const VkExtent2D fragmentSize = { 1, 1 };
+        const VkFragmentShadingRateCombinerOpKHR combinerOps[2] = {
+            VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR,
+            (image != nullptr) ? VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR : VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR
+        };
+
+        vkCmdSetFragmentShadingRateKHR(vk, &fragmentSize, combinerOps);
     }
 
     void VulkanCommandList::setDepthBias(float depthBias, float depthBiasClamp, float slopeScaledDepthBias) {
@@ -3457,6 +3593,12 @@ namespace plume {
 
     void VulkanCommandList::checkActiveRenderPass() {
         assert(targetFramebuffer != nullptr);
+
+        // Every pipeline has the shading rate as dynamic state: without a call
+        // to setShadingRateImage, the attachment's rates are not used.
+        if (!shadingRateSet) {
+            setShadingRateImage(nullptr);
+        }
         
         if (activeRenderPass == VK_NULL_HANDLE) {
             VkRenderPassBeginInfo beginInfo = {};
@@ -3802,6 +3944,9 @@ namespace plume {
             else if (isAdditionalExtension(VulkanAdditionalDeviceExtensions, extensionName) && (RequiredDeviceExtensions.find(extensionName) == RequiredDeviceExtensions.end())) {
                 supportedOptionalExtensions.insert(extensionName);
             }
+            else if (VulkanShadingRateAttachments && (extensionName == VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME)) {
+                supportedOptionalExtensions.insert(extensionName);
+            }
 #       if DLSS_ENABLED
             else if (dlssExtensions.find(extensionName) != dlssExtensions.end()) {
                 supportedOptionalExtensions.insert(extensionName);
@@ -3860,12 +4005,42 @@ namespace plume {
         portabilityFeatures.pNext = featuresChain;
         featuresChain = &portabilityFeatures;
 
+        VkPhysicalDeviceFragmentShadingRateFeaturesKHR shadingRateFeatures = {};
+        const bool shadingRateExtension = supportedOptionalExtensions.find(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) != supportedOptionalExtensions.end();
+        if (shadingRateExtension) {
+            shadingRateFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR;
+            shadingRateFeatures.pNext = featuresChain;
+            featuresChain = &shadingRateFeatures;
+        }
+
         VkPhysicalDeviceFeatures2 deviceFeatures = {};
         deviceFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
         deviceFeatures.pNext = featuresChain;
         vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures);
 
         void *createDeviceChain = nullptr;
+
+        // Shading rate attachments: the tile size closest to 16 pixels the device takes.
+        VkPhysicalDeviceFragmentShadingRatePropertiesKHR shadingRateProperties = {};
+        if (shadingRateExtension && shadingRateFeatures.pipelineFragmentShadingRate && shadingRateFeatures.attachmentFragmentShadingRate) {
+            shadingRateProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_PROPERTIES_KHR;
+
+            VkPhysicalDeviceProperties2 deviceProperties2 = {};
+            deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+            deviceProperties2.pNext = &shadingRateProperties;
+            vkGetPhysicalDeviceProperties2(physicalDevice, &deviceProperties2);
+
+            const VkExtent2D &minTexelSize = shadingRateProperties.minFragmentShadingRateAttachmentTexelSize;
+            const VkExtent2D &maxTexelSize = shadingRateProperties.maxFragmentShadingRateAttachmentTexelSize;
+            const uint32_t minSize = std::max(minTexelSize.width, minTexelSize.height);
+            const uint32_t maxSize = std::min(maxTexelSize.width, maxTexelSize.height);
+            if ((minSize > 0) && (minSize <= maxSize)) {
+                const uint32_t texelSize = std::clamp(16U, minSize, maxSize);
+                shadingRateAttachments = true;
+                shadingRateTexelSize = { texelSize, texelSize };
+
+            }
+        }
         VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures = {};
         VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures = {};
         const bool rtSupported = supportedOptionalExtensions.find(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) != supportedOptionalExtensions.end();
@@ -3934,6 +4109,13 @@ namespace plume {
         if (portabilitySubset) {
             portabilityFeatures.pNext = createDeviceChain;
             createDeviceChain = &portabilityFeatures;
+        }
+
+        // Chained last: the ray tracing features above start the chain over.
+        if (shadingRateAttachments) {
+            shadingRateFeatures.primitiveFragmentShadingRate = VK_FALSE;
+            shadingRateFeatures.pNext = createDeviceChain;
+            createDeviceChain = &shadingRateFeatures;
         }
 
         // Retrieve the information for the queue families.
@@ -4099,6 +4281,11 @@ namespace plume {
         capabilities.maxTextureSize = physicalDeviceProperties.limits.maxImageDimension2D;
         capabilities.preferHDR = memoryHeapSize > (512 * 1024 * 1024);
         capabilities.dynamicDepthBias = true;
+        capabilities.shadingRateAttachment = shadingRateAttachments;
+        capabilities.shadingRateImage = shadingRateAttachments;
+        capabilities.shadingRateImageLayers = shadingRateAttachments && shadingRateProperties.layeredShadingRateAttachments;
+        capabilities.shadingRateImageTileSize = shadingRateTexelSize.width;
+        capabilities.shadingRateImageCoarseRates = shadingRateAttachments && (shadingRateProperties.maxFragmentSize.width >= 4) && (shadingRateProperties.maxFragmentSize.height >= 4);
         capabilities.vertexShaderLayerAndViewport = deviceFeatures.features.multiViewport &&
             (supportedOptionalExtensions.find(VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME) != supportedOptionalExtensions.end());
         capabilities.queryPools = true;
@@ -4181,6 +4368,10 @@ namespace plume {
 
     std::unique_ptr<RenderCommandSemaphore> VulkanDevice::createCommandSemaphore() {
         return std::make_unique<VulkanCommandSemaphore>(this);
+    }
+
+    void VulkanDevice::setShadingRateAttachment(const RenderTexture *texture) {
+        shadingRateTexture = static_cast<const VulkanTexture *>(texture);
     }
 
     std::unique_ptr<RenderFramebuffer> VulkanDevice::createFramebuffer(const RenderFramebufferDesc &desc) {

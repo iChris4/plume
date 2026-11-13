@@ -245,6 +245,9 @@ namespace plume {
         virtual std::unique_ptr<RenderCommandFence> createCommandFence() = 0;
         virtual std::unique_ptr<RenderCommandSemaphore> createCommandSemaphore() = 0;
         virtual std::unique_ptr<RenderFramebuffer> createFramebuffer(const RenderFramebufferDesc &desc) = 0;
+
+        // See RenderDeviceCapabilities::shadingRateAttachment.
+        virtual void setShadingRateAttachment(const RenderTexture *texture) { }
         virtual std::unique_ptr<RenderQueryPool> createQueryPool(uint32_t queryCount) = 0;
         virtual void setBottomLevelASBuildInfo(RenderBottomLevelASBuildInfo &buildInfo, const RenderBottomLevelASMesh *meshes, uint32_t meshCount, bool preferFastBuild = true, bool preferFastTrace = false) = 0;
         virtual void setTopLevelASBuildInfo(RenderTopLevelASBuildInfo &buildInfo, const RenderTopLevelASInstance *instances, uint32_t instanceCount, bool preferFastBuild = true, bool preferFastTrace = false) = 0;
